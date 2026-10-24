@@ -93,15 +93,21 @@ pub const NatPmpResponse = struct {
 
 /// A single connection to a single NAT-PMP gateway.
 ///
-/// You probably want to make requests with `requestPublicAddress` or
-/// `requestPortMapping`, and then await the response with `awaitResponse`.
+/// You probably want to call `requestPublicAddress`,
+/// which gets and stores the address of the gateway,
+/// and then `requestPortMapping`.
+///
+/// You can get the response by either looping on
+/// `getPendingResponse` or just calling `awaitPendingResponse`
+/// which will poll and retry for you.
 pub const Client = struct {
     const This = @This();
 
     c_obj: NatPmp,
     last_errno: *c_int,
 
-    /// Request the public address of the gateway.
+    /// Requests and stores the public address of the gateway.
+    /// You should call this before you request a port mapping.
     pub fn requestPublicAddress(self: *This) !void {
         switch (natpmp.sendpublicaddressrequest(&self.c_obj)) {
             2 => return,
@@ -169,38 +175,10 @@ pub const Client = struct {
         return self.requestPortMapping(protocol, 0, 0, 0);
     }
 
-    /// Block on the pending response and return the result.
-    pub fn awaitResponse(self: *This) !NatPmpResponse {
-        var timeout_val: NatPmpTimeVal = undefined;
-        var timeout_ms: i32 = undefined;
-        switch (natpmp.getnatpmprequesttimeout(&self.c_obj, &timeout_val)) {
-            0 => {
-                var _timeout_ms = (1000 * timeout_val.tv_sec);
-                _timeout_ms += @divTrunc(timeout_val.tv_usec, 1000);
-                timeout_ms = @intCast(@max(0, timeout_ms));
-            },
-            natpmp.NATPMP_ERR_INVALIDARGS => return error.InvalidArgs,
-            natpmp.NATPMP_ERR_GETTIMEOFDAYERR => return error.GetTimeOfDayError,
-            natpmp.NATPMP_ERR_NOPENDINGREQ => return error.NoPendingRequest,
-            else => return error.UnknownError,
-        }
-
-        var fd: PollFd = .{
-            .fd = self.c_obj.s,
-            .events = libctypes.POLLIN,
-            .revents = 0,
-        };
-
-        if (poll(&fd, 1, timeout_ms) < 0) {
-            self.last_errno = std.c._errno();
-            return error.ResponsePollError;
-        }
-
-        return self.getPendingResponse();
-    }
-
     /// Get the pending response if one is ready.
-    fn getPendingResponse(self: *This) !NatPmpResponse {
+    /// If the response is `error.TryAgain`,
+    /// the pending request will be sent again.
+    pub fn getPendingResponse(self: *This) !NatPmpResponse {
         var response: natpmp.natpmpresp_t = undefined;
 
         try self.handleResponseError(
@@ -244,7 +222,45 @@ pub const Client = struct {
         };
     }
 
+    /// Poll the socket being used for the connection until it receives
+    /// a response, and retry the request when its safe to do so.
+    pub fn awaitResponse(self: *This) !NatPmpResponse {
+        var timeout_val: NatPmpTimeVal = undefined;
+        var timeout_ms: i32 = undefined;
+        switch (natpmp.getnatpmprequesttimeout(&self.c_obj, &timeout_val)) {
+            0 => {
+                var _timeout_ms = (1000 * timeout_val.tv_sec);
+                _timeout_ms += @divTrunc(timeout_val.tv_usec, 1000);
+                timeout_ms = @intCast(@max(0, timeout_ms));
+            },
+            natpmp.NATPMP_ERR_INVALIDARGS => return error.InvalidArgs,
+            natpmp.NATPMP_ERR_GETTIMEOFDAYERR => return error.GetTimeOfDayError,
+            natpmp.NATPMP_ERR_NOPENDINGREQ => return error.NoPendingRequest,
+            else => return error.UnknownError,
+        }
+
+        var fd: PollFd = .{
+            .fd = self.c_obj.s,
+            .events = libctypes.POLLIN,
+            .revents = 0,
+        };
+
+        if (poll(&fd, 1, timeout_ms) < 0) {
+            self.last_errno = std.c._errno();
+            return error.ResponsePollError;
+        }
+
+        return self.getPendingResponse() catch |err| {
+            if (err == error.TryAgain) {
+                return self.awaitResponse();
+            } else {
+                return err;
+            }
+        };
+    }
+
     /// Handle a `readnatpmpresponseorretry` return code.
+    /// Sets `self.last_errno` for the various errors that use it.
     fn handleResponseError(self: *This, retcode: c_int) !void {
         switch (retcode) {
             0 => return, // continue to response processing
@@ -301,7 +317,7 @@ pub const Client = struct {
     }
 };
 
-/// Initiliase a `Client`.
+/// Initialise a `Client`.
 /// You must call `deinit` on the object when you're done.
 ///
 /// If the gateway address is not supplied it will be
