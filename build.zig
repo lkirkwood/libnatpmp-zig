@@ -42,15 +42,15 @@ pub fn build(b: *std.Build) void {
     // multiple modules and consumers will need to be able to specify which
     // module they want to access.
     const mod = b.addModule(
-        "libnatpmp_zig",
+        "natpmp_zig",
         .{
-            .root_source_file = b.path("src/root.zig"),
+            .root_source_file = b.path("src/lib.zig"),
             .target = target,
             .optimize = optimize,
             .link_libc = true,
             .imports = &.{
                 .{
-                    .name = "natpmp",
+                    .name = "natpmp_c",
                     .module = translated_natpmp.createModule(),
                 },
                 .{

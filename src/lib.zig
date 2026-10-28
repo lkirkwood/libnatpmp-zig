@@ -5,7 +5,7 @@ const libctypes = @import("libctypes");
 const PollFd = libctypes.pollfd;
 const poll = libctypes.poll;
 
-const natpmp = @import("natpmp");
+const natpmp = @import("natpmp_c");
 
 /// The primary type from the C library that stores all the data.
 const NatPmp = natpmp.natpmp_t;
