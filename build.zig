@@ -78,4 +78,36 @@ pub fn build(b: *std.Build) void {
     // make the two of them run in parallel.
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
+
+    // Client stuff
+
+    const client_mod = b.createModule(.{
+        .root_source_file = b.path("src/client.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "natpmp", .module = mod },
+        },
+    });
+
+    const client_exe = b.addExecutable(.{
+        .name = "natpmpctl",
+        .use_llvm = true,
+        .root_module = client_mod,
+    });
+    b.installArtifact(client_exe);
+
+    const client_exe_tests = b.addTest(.{
+        .root_module = client_mod,
+        .use_llvm = true,
+    });
+
+    const check_client_exe = b.addExecutable(.{
+        .name = "natpmpctl",
+        .root_module = client_mod,
+    });
+
+    const check_client_step = b.step("check", "Check the program compiles.");
+    check_client_step.dependOn(&check_client_exe.step);
+    check_client_step.dependOn(&client_exe_tests.step);
 }
