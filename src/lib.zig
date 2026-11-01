@@ -36,6 +36,9 @@ pub const NatPmpError = error{
     NoPendingRequest,
     /// The gateway does not support NAT-PMP.
     NoGatewaySupport,
+    /// The request required too many retries to get a response.
+    /// The gateway likely does not support the protocol.
+    TooManyRetries,
     /// `connect()` failed, check `last_errno` on the client for details.
     ConnectError,
     /// Packet was not received from the network gateway.
@@ -122,6 +125,8 @@ pub const Client = struct {
 
     /// Request a port mapping from `private_port` on this
     /// machine to `public_port` on the gateway.
+    /// The public port requested is a suggestion. The return value of this
+    /// function is the actual public port used in the mapping.
     ///
     /// Only packets sent using `protocol` will be forwarded by the gateway.
     ///
@@ -225,13 +230,37 @@ pub const Client = struct {
     /// Poll the socket being used for the connection until it receives
     /// a response, and retry the request when its safe to do so.
     pub fn awaitResponse(self: *This) !NatPmpResponse {
+        var retries: u4 = 0;
+        while (retries < 10) {
+            const response = self._awaitResponse() catch |err| {
+                if (err == error.TryAgain) {
+                    retries += 1;
+                    continue;
+                }
+                return err;
+            };
+            return response;
+        }
+
+        std.log.err(
+            "Failed to get the response from the gateway after {d} retries.",
+            .{retries},
+        );
+        std.log.err("The gateway might not support the protocol,", .{});
+        std.log.err("or it might have it disabled for your client.", .{});
+        return error.TooManyRetries;
+    }
+
+    /// Actual logic for `awaitResponse` inside retry loop.
+    fn _awaitResponse(self: *This) !NatPmpResponse {
         var timeout_val: NatPmpTimeVal = undefined;
         var timeout_ms: i32 = undefined;
         switch (natpmp.getnatpmprequesttimeout(&self.c_obj, &timeout_val)) {
             0 => {
                 var _timeout_ms = (1000 * timeout_val.tv_sec);
                 _timeout_ms += @divTrunc(timeout_val.tv_usec, 1000);
-                timeout_ms = @intCast(@max(0, timeout_ms));
+                timeout_ms = @intCast(@max(0, _timeout_ms));
+                std.log.debug("Response timeout: {d}", .{timeout_ms});
             },
             natpmp.NATPMP_ERR_INVALIDARGS => return error.InvalidArgs,
             natpmp.NATPMP_ERR_GETTIMEOFDAYERR => return error.GetTimeOfDayError,
@@ -250,13 +279,7 @@ pub const Client = struct {
             return error.ResponsePollError;
         }
 
-        return self.getPendingResponse() catch |err| {
-            if (err == error.TryAgain) {
-                return self.awaitResponse();
-            } else {
-                return err;
-            }
-        };
+        return self.getPendingResponse();
     }
 
     /// Handle a `readnatpmpresponseorretry` return code.
@@ -322,7 +345,8 @@ pub const Client = struct {
 ///
 /// If the gateway address is not supplied it will be
 /// detected automatically. It must be given in network byte
-/// order, so last octet first i.e. 1.1.168.192
+/// order, so last octet first i.e. 192.168.1.1 would be:
+/// `[1, 1, 168, 192]`
 pub fn initNatPmpClient(gateway_addr: ?[4]u8) !Client {
     var obj: NatPmp = undefined;
 
