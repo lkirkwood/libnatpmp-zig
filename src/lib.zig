@@ -104,6 +104,7 @@ pub const Client = struct {
 
     c_obj: NatPmp,
     last_errno: *c_int,
+    public_address: ?u32,
 
     /// Requests and stores the public address of the gateway.
     /// You should call this before you request a port mapping.
@@ -188,6 +189,7 @@ pub const Client = struct {
 
         if (response.type == natpmp.NATPMP_RESPTYPE_PUBLICADDRESS) {
             const addr = response.pnu.publicaddress.addr.s_addr;
+            self.public_address = addr;
             return NatPmpResponse{
                 .epoch = response.epoch,
                 .resultcode = response.resultcode,
@@ -339,7 +341,7 @@ pub const Client = struct {
 /// detected automatically. It must be given in network byte
 /// order, so last octet first i.e. 192.168.1.1 would be:
 /// `[1, 1, 168, 192]`
-pub fn initNatPmpClient(gateway_addr: ?[4]u8) !Client {
+pub fn initClient(gateway_addr: ?[4]u8) !Client {
     var obj: NatPmp = undefined;
 
     var force_gw: c_int = undefined;
@@ -353,7 +355,11 @@ pub fn initNatPmpClient(gateway_addr: ?[4]u8) !Client {
     }
 
     return switch (natpmp.initnatpmp(&obj, force_gw, forced_gw)) {
-        0 => Client{ .c_obj = obj, .last_errno = undefined },
+        0 => Client{
+            .c_obj = obj,
+            .last_errno = undefined,
+            .public_address = null,
+        },
         natpmp.NATPMP_ERR_INVALIDARGS => error.InvalidArgs,
         natpmp.NATPMP_ERR_SOCKETERROR => error.SocketError,
         natpmp.NATPMP_ERR_CANNOTGETGATEWAY => error.CannotGetGateway,
