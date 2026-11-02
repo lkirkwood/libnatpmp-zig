@@ -101,8 +101,8 @@ fn parseMapArgs(args_iter: *std.process.Args.Iterator) !MapArgs {
         }
     }
 
-    const private_port = try parseUint(u16, args[0].?);
-    const public_port = try parseUint(u16, args[1].?);
+    const public_port = try parseUint(u16, args[0].?);
+    const private_port = try parseUint(u16, args[1].?);
     const lifetime = if (args[3] != null)
         try parseUint(u32, args[3].?)
     else
