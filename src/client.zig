@@ -205,26 +205,30 @@ fn mapPort(args: MapArgs) !u32 {
 }
 
 const HELP_TEXT =
+    \\
     \\natpmpctl  -  NAT-PMP client.
     \\
-    \\Usage:
-    \\  gateway [-g <gateway>]
-    \\    - Request and print the public address of the gateway.
-    \\      - The optional gateway argument is the private IPv4 address of the
-    \\        gateway to use. If unset, your default gateway will be used.
+    \\Flags:
+    \\  -g <gateway>
+    \\    + The IPv4 address of the gateway to use.
+    \\      If unset, your default gateway will be used.
+    \\      Optional and usable with all commands.
     \\
-    \\  map [-g <gateway>] <public port> <private port> <protocol> [lifetime]
-    \\    - Request a mapping from the private port to the public port for
+    \\Commands:
+    \\  gateway
+    \\    + Request and print the public address of the gateway.
+    \\
+    \\  map <public port> <private port> <protocol> [lifetime]
+    \\    + Request a mapping from the private port to the public port for
     \\      the given protocol.
-    \\      - The optional gateway argument is the same as above.
-    \\      - The public port is the port on the gateway's public interface that
+    \\      + The public port is the port on the gateway's public interface that
     \\        will be used to exchange traffic with theoutside world.
     \\        The gateway may not use this value and assign you a random port.
-    \\      - The private port is the port on this machine that can send and
+    \\      + The private port is the port on this machine that can send and
     \\        receive traffic.
-    \\      - The protocol must be either "tcp" or "udp". The gateway will only
+    \\      + The protocol must be either "tcp" or "udp". The gateway will only
     \\        forward traffic using this protocol.
-    \\      - The lifetime is the requested lifetime for the mapping in seconds.
+    \\      + The lifetime is the requested lifetime for the mapping in seconds.
     \\        Again the gateway may not honour this value and use its own.
     \\        Defaults to 3600 seconds (1 hour).
 ;
