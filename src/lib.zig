@@ -1,10 +1,6 @@
 const std = @import("std");
 const Io = std.Io;
 
-const libctypes = @import("libctypes");
-const PollFd = libctypes.pollfd;
-const poll = libctypes.poll;
-
 const natpmp = @import("natpmp_c");
 
 /// The primary type from the C library that stores all the data.
@@ -143,7 +139,7 @@ pub const Client = struct {
     ) !void {
         const retcode = natpmp.sendnewportmappingrequest(
             &self.c_obj,
-            @intFromEnum(protocol),
+            @backingInt(protocol),
             private_port,
             public_port,
             lifetime,
@@ -260,7 +256,6 @@ pub const Client = struct {
                 var _timeout_ms = (1000 * timeout_val.tv_sec);
                 _timeout_ms += @divTrunc(timeout_val.tv_usec, 1000);
                 timeout_ms = @intCast(@max(0, _timeout_ms));
-                std.log.debug("Response timeout: {d}", .{timeout_ms});
             },
             natpmp.NATPMP_ERR_INVALIDARGS => return error.InvalidArgs,
             natpmp.NATPMP_ERR_GETTIMEOFDAYERR => return error.GetTimeOfDayError,
@@ -268,16 +263,13 @@ pub const Client = struct {
             else => return error.UnknownError,
         }
 
-        var fd: PollFd = .{
+        var fds: [1]std.posix.pollfd = .{.{
             .fd = self.c_obj.s,
-            .events = libctypes.POLLIN,
+            .events = std.posix.POLL.IN,
             .revents = 0,
-        };
+        }};
 
-        if (poll(&fd, 1, timeout_ms) < 0) {
-            self.last_errno = std.c._errno();
-            return error.ResponsePollError;
-        }
+        _ = try std.posix.poll(&fds, timeout_ms);
 
         return self.getPendingResponse();
     }

@@ -27,13 +27,6 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
 
-    const translated_libctypes = b.addTranslateC(.{
-        .root_source_file = b.path("include/libctypes.h"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-    });
-
     // This creates a module, which represents a collection of source files alongside
     // some compilation options, such as optimization mode and linked system libraries.
     // Zig modules are the preferred way of making Zig code available to consumers.
@@ -52,10 +45,6 @@ pub fn build(b: *std.Build) void {
                 .{
                     .name = "natpmp_c",
                     .module = translated_natpmp.createModule(),
-                },
-                .{
-                    .name = "libctypes",
-                    .module = translated_libctypes.createModule(),
                 },
             },
         },
