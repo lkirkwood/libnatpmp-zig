@@ -5,6 +5,7 @@ const natpmp = @import("natpmp");
 const MapArgs = client.MapArgs;
 const setupClient = client.setupClient;
 const mapPort = client.mapPort;
+const persistPort = client.persistPort;
 
 /// Parse a gateway address from a string and return it.
 fn parseGatewayAddr(string: [:0]const u8) ![4]u8 {
@@ -156,7 +157,15 @@ const HELP_TEXT =
     \\        forward traffic using this protocol.
     \\      + The lifetime is the requested lifetime for the mapping in seconds.
     \\        Again the gateway may not honour this value and use its own.
-    \\        Defaults to 3600 seconds (1 hour).
+    \\        Defaults to 3600 seconds (1 hour). Set lifetime to 0 to clear
+    \\        a port mapping manually.
+    \\
+    \\  persist <public port> <private port> <protocol> [lifetime]
+    \\    + Identical to map, except it will refresh the mapping manually until
+    \\      the lifetime expires. The public port may change over time, so this
+    \\      command will write to to stdout whenever it changes, followed by
+    \\      a newline character.
+    \\      + Set lifetime to 0 to persist the mapping indefinitely.
 ;
 
 /// Print the help text.
@@ -200,9 +209,28 @@ pub fn main(init: std.process.Init) !void {
             std.process.exit(1);
         };
 
-        _ = mapPort(map_args) catch |err| {
+        _ = mapPort(&map_args) catch |err| {
             std.log.err(
                 "Port mapping request hit a fatal error: {s}",
+                .{@errorName(err)},
+            );
+            std.process.exit(1);
+        };
+    } else if (std.mem.eql(u8, cmd.?, "persist")) {
+        var map_args = parseMapArgs(&args) catch |err| {
+            std.log.err(
+                "Argument parsing hit a fatal error: {s}",
+                .{@errorName(err)},
+            );
+            help();
+            std.process.exit(1);
+        };
+
+        const alloc = std.heap.page_allocator;
+        var io = std.Io.Threaded.init(alloc, .{});
+        persistPort(io.io(), &map_args) catch |err| {
+            std.log.err(
+                "Persistent port mapping hit a fatal error: {s}",
                 .{@errorName(err)},
             );
             std.process.exit(1);

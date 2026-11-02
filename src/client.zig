@@ -7,6 +7,7 @@ pub const ClientErrors = error{
     InvalidLifetime,
     MultipleGatewayAddresses,
     InvalidGatewayAddress,
+    ReallyBigPublicPort,
 };
 
 /// Format an IPv4 address as a number to a string.
@@ -51,7 +52,7 @@ pub const MapArgs = struct {
 };
 
 /// Request a port mapping and return the actual public port assigned.
-pub fn mapPort(args: MapArgs) !u32 {
+pub fn mapPort(args: *const MapArgs) !natpmp.NatPmpPortMapping {
     var client = try setupClient(args.gateway_addr);
 
     try client.requestPortMapping(
@@ -73,5 +74,52 @@ pub fn mapPort(args: MapArgs) !u32 {
         .{response.resource.port_mapping.lifetime},
     );
 
-    return response.resource.port_mapping.public_port;
+    return response.resource.port_mapping;
+}
+
+/// Persist a port mapping for the lifetime, or indefinitely if lifetime is 0.
+/// Writes the public port assigned to stdout whenever it changes.
+pub fn persistPort(io: std.Io, args: *MapArgs) !void {
+    var now = std.Io.Clock.now(.boot, io);
+    var deadline: ?std.Io.Timestamp = null;
+    if (args.lifetime != 0) {
+        deadline = now.addDuration(std.Io.Duration.fromSeconds(args.lifetime));
+    }
+
+    const stdout = std.Io.File.stdout();
+    while (deadline == null or deadline.?.compare(.gt, now)) {
+        const response = try mapPort(args);
+        std.log.info(
+            "Public port {d} mapped to {d} for {d} seconds.",
+            .{ response.public_port, args.private_port, response.lifetime },
+        );
+
+        if (response.public_port != args.public_port) {
+            args.public_port = response.public_port;
+            var port_str_buf: [64]u8 = undefined;
+            const port_str = std.fmt.bufPrint(
+                &port_str_buf,
+                "{d}\n",
+                .{response.public_port},
+            ) catch {
+                std.log.err(
+                    "Public port number somehow longer than 64 digits??",
+                    .{},
+                );
+                return error.ReallyBigPublicPort;
+            };
+            stdout.writeStreamingAll(io, port_str) catch |err| {
+                std.log.err(
+                    "Failed to write public port to stdout: {s}",
+                    .{@errorName(err)},
+                );
+                return err;
+            };
+        }
+
+        const sleep_seconds = @max(0, response.lifetime - 10);
+        try std.Io.sleep(io, .fromSeconds(sleep_seconds), .boot);
+
+        now = std.Io.Clock.now(.boot, io);
+    }
 }
