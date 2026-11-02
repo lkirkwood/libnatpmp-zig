@@ -9,17 +9,10 @@ const ClientErrors = error{
     InvalidGatewayAddress,
 };
 
-/// Arguments expected to the port mapping function.
-const MapArgs = struct {
-    private_port: u16,
-    public_port: u16,
-    protocol: natpmp.NatPmpProtocol,
-    lifetime: u32,
-    gateway_addr: ?[4]u8,
-};
+// Parsing
 
 /// Parse a gateway address from a string and return it.
-fn parseGwAddr(string: [:0]const u8) ![4]u8 {
+fn parseGatewayAddr(string: [:0]const u8) ![4]u8 {
     var addr: [4]u8 = undefined;
     var octets = std.mem.splitSequence(u8, string, ".");
     var octet_pos: u3 = 0;
@@ -72,6 +65,15 @@ fn parseUint(comptime T: type, string: [:0]const u8) !T {
     };
 }
 
+/// Arguments expected to the port mapping function.
+const MapArgs = struct {
+    private_port: u16,
+    public_port: u16,
+    protocol: natpmp.NatPmpProtocol,
+    lifetime: u32,
+    gateway_addr: ?[4]u8,
+};
+
 /// Parse arguments to the map command.
 fn parseMapArgs(args_iter: *std.process.Args.Iterator) !MapArgs {
     var num_args: usize = 0;
@@ -89,7 +91,7 @@ fn parseMapArgs(args_iter: *std.process.Args.Iterator) !MapArgs {
                 std.log.err("You can only use one gateway address.", .{});
                 return error.MultipleGatewayAddresses;
             }
-            gateway_addr = try parseGwAddr(next_arg);
+            gateway_addr = try parseGatewayAddr(next_arg);
             gateway_flag = false;
         } else if (std.mem.eql(u8, next_arg, "-g")) {
             gateway_flag = true;
