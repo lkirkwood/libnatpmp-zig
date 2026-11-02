@@ -71,7 +71,7 @@ pub fn build(b: *std.Build) void {
     // Client stuff
 
     const client_mod = b.createModule(.{
-        .root_source_file = b.path("src/client.zig"),
+        .root_source_file = b.path("src/cli.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
