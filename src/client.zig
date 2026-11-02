@@ -130,26 +130,57 @@ fn parseMapArgs(args_iter: *std.process.Args.Iterator) !MapArgs {
     };
 }
 
-/// Request a port mapping.
-fn mapPort(args: MapArgs) !u32 {
-    if (args.gateway_addr != null) {
-        std.log.info("Using {d}.{d}.{d}.{d} as the gateway address.", .{
-            args.gateway_addr.?[0],
-            args.gateway_addr.?[1],
-            args.gateway_addr.?[2],
-            args.gateway_addr.?[3],
-        });
+/// Parse arguments to the gateway command.
+fn parseGatewayArgs(args_iter: *std.process.Args.Iterator) !?[4]u8 {
+    var gateway_flag = false;
+    var gateway_addr: ?[4]u8 = null;
+
+    while (args_iter.next()) |next_arg| {
+        if (gateway_flag) {
+            if (gateway_addr != null) {
+                std.log.err("You can only use one gateway address.", .{});
+                return error.MultipleGatewayAddresses;
+            }
+            gateway_addr = try parseGatewayAddr(next_arg);
+        } else if (std.mem.eql(u8, next_arg, "-g")) {
+            gateway_flag = true;
+        } else {
+            std.log.err("Unexpected argument: {s}", .{next_arg});
+            return error.InvalidArgs;
+        }
     }
 
-    var client = try natpmp.initNatPmpClient(args.gateway_addr);
-    try client.requestPublicAddress();
-    const public_addr_response = try client.awaitResponse();
+    return gateway_addr;
+}
 
-    const octets = try splitOctets(public_addr_response.resource.public_address);
+// Operations
+
+/// Initialise a client, log the private and public gateway addresses,
+/// and return the client.
+fn setupClient(gateway_addr: ?[4]u8) !natpmp.Client {
+    std.log.info("Using {d}.{d}.{d}.{d} as the gateway address.", .{
+        gateway_addr.?[0],
+        gateway_addr.?[1],
+        gateway_addr.?[2],
+        gateway_addr.?[3],
+    });
+
+    var client = try natpmp.initClient(gateway_addr);
+    try client.requestPublicAddress();
+    const response = try client.awaitResponse();
+    const gw_addr = try splitOctets(response.resource.public_address);
+
     std.log.info(
         "Gateway has public address: {d}.{d}.{d}.{d}",
-        .{ octets[0], octets[1], octets[2], octets[3] },
+        .{ gw_addr[0], gw_addr[1], gw_addr[2], gw_addr[3] },
     );
+
+    return client;
+}
+
+/// Request a port mapping and return the actual public port assigned.
+fn mapPort(args: MapArgs) !u32 {
+    var client = try setupClient(args.gateway_addr);
 
     try client.requestPortMapping(
         args.protocol,
@@ -159,11 +190,48 @@ fn mapPort(args: MapArgs) !u32 {
     );
 
     const response = try client.awaitResponse();
+    const public_port = response.resource.port_mapping.public_port;
+
+    std.log.info(
+        "Successfully mapped private port {d} to public port {d}.",
+        .{ args.private_port, public_port },
+    );
+    std.log.info(
+        "Mapping has a lifetime of {d} seconds.",
+        .{response.resource.port_mapping.lifetime},
+    );
+
     return response.resource.port_mapping.public_port;
 }
 
+const HELP_TEXT =
+    \\natpmpctl  -  NAT-PMP client.
+    \\
+    \\Usage:
+    \\  gateway [-g <gateway>]
+    \\    - Request and print the public address of the gateway.
+    \\      - The optional gateway argument is the private IPv4 address of the
+    \\        gateway to use. If unset, your default gateway will be used.
+    \\
+    \\  map [-g <gateway>] <public port> <private port> <protocol> [lifetime]
+    \\    - Request a mapping from the private port to the public port for
+    \\      the given protocol.
+    \\      - The optional gateway argument is the same as above.
+    \\      - The public port is the port on the gateway's public interface that
+    \\        will be used to exchange traffic with theoutside world.
+    \\        The gateway may not use this value and assign you a random port.
+    \\      - The private port is the port on this machine that can send and
+    \\        receive traffic.
+    \\      - The protocol must be either "tcp" or "udp". The gateway will only
+    \\        forward traffic using this protocol.
+    \\      - The lifetime is the requested lifetime for the mapping in seconds.
+    \\        Again the gateway may not honour this value and use its own.
+    \\        Defaults to 3600 seconds (1 hour).
+;
+
+/// Print the help text.
 fn help() void {
-    std.log.info("TODO add some help text", .{});
+    std.debug.print("{s}\n", .{HELP_TEXT});
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -171,7 +239,28 @@ pub fn main(init: std.process.Init) !void {
     _ = args.skip();
     const cmd = args.next();
 
-    if (cmd != null and std.mem.eql(u8, cmd.?, "map")) {
+    if (cmd == null) {
+        help();
+        std.process.exit(1);
+    }
+
+    if (std.mem.eql(u8, cmd.?, "gateway")) {
+        const gw_addr = parseGatewayArgs(&args) catch |err| {
+            std.log.err(
+                "Argument parsing hit a fatal error: {s}",
+                .{@errorName(err)},
+            );
+            std.process.exit(1);
+        };
+
+        _ = setupClient(gw_addr) catch |err| {
+            std.log.err(
+                "Getting public gateway address hit a fatal error: {s}",
+                .{@errorName(err)},
+            );
+            std.process.exit(1);
+        };
+    } else if (std.mem.eql(u8, cmd.?, "map")) {
         const map_args = parseMapArgs(&args) catch |err| {
             std.log.err(
                 "Argument parsing hit a fatal error: {s}",
@@ -181,20 +270,15 @@ pub fn main(init: std.process.Init) !void {
             std.process.exit(1);
         };
 
-        const public_port = mapPort(map_args) catch |err| {
+        _ = mapPort(map_args) catch |err| {
             std.log.err(
                 "Port mapping request hit a fatal error: {s}",
                 .{@errorName(err)},
             );
             std.process.exit(1);
         };
-
-        std.log.info(
-            "Successfully mapped private port {d} to public port {d}.",
-            .{ map_args.private_port, public_port },
-        );
     } else {
-        if (cmd != null) std.log.err("Unknown command {s}", .{cmd.?});
+        std.log.err("Unknown command {s}", .{cmd.?});
         help();
         std.process.exit(1);
     }
